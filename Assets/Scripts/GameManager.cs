@@ -5,16 +5,35 @@ using TMPro;
 
 public class GameManager : MonoBehaviour
 {
-    public float timeLeft = 30f;
-    public int winScore = 3;
+    public static GameManager Instance { get; private set; }
 
+    [Header("Original Preserved Fields")]
+    public float timeLeft = 600f;
+    public int winScore = 3;
     public ScoreZone zone;
     public TMP_Text timerText;
     public GameObject endPanel;
     public TMP_Text endText;
     public KeyboardRotate cannonRotate;
-
     public bool gameOver = false;
+
+    [Header("The Starroot Relic Systems")]
+    public int crystalsCollected = 0;
+    public int totalCrystals = 3;
+    public bool pressurePlatesSolved = false;
+    public bool symbolsSolved = false;
+    public bool templeGateUnlocked = false;
+    public bool relicClaimed = false;
+
+    [Header("Temple & Gate References")]
+    public AncientGate finalTempleGate;
+    public GameHUD hud;
+    public Health playerHealth;
+
+    void Awake()
+    {
+        Instance = this;
+    }
 
     void Start()
     {
@@ -23,72 +42,153 @@ public class GameManager : MonoBehaviour
             endPanel.SetActive(false);
         }
 
-        if (timerText != null)
+        UpdateObjective();
+        UpdateCrystalHUD();
+
+        if (hud == null)
         {
-            timerText.color = Color.white;
+            hud = FindFirstObjectByType<GameHUD>();
+        }
+
+        if (playerHealth == null)
+        {
+            playerHealth = FindFirstObjectByType<Health>();
         }
     }
 
     void Update()
     {
-        // Restart when R is pressed after the game ends
         if (gameOver)
         {
-            if (Keyboard.current != null &&
-                Keyboard.current.rKey.wasPressedThisFrame)
+            bool restartPressed = false;
+            if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
             {
-                SceneManager.LoadScene(
-                    SceneManager.GetActiveScene().buildIndex
-                );
+                restartPressed = true;
+            }
+            else if (Input.GetKeyDown(KeyCode.R))
+            {
+                restartPressed = true;
             }
 
+            if (restartPressed)
+            {
+                RestartGame();
+            }
             return;
         }
 
-        // Countdown timer
-        timeLeft -= Time.deltaTime;
-        timeLeft = Mathf.Max(timeLeft, 0f);
-
-        if (timerText != null)
+        // Optional countdown
+        if (timeLeft > 0f)
         {
-            timerText.text =
-                "Time: " + Mathf.CeilToInt(timeLeft);
+            timeLeft -= Time.deltaTime;
+            timeLeft = Mathf.Max(timeLeft, 0f);
 
-            if (timeLeft <= 10f)
+            if (timerText != null)
             {
-                timerText.color = Color.red;
+                timerText.text = "Time: " + Mathf.CeilToInt(timeLeft);
+                if (timeLeft <= 10f)
+                {
+                    timerText.color = Color.red;
+                }
             }
-        }
-
-        // Win or lose conditions
-        if (zone != null && zone.knockedDown >= winScore)
-        {
-            EndGame("YOU WIN!");
-        }
-        else if (timeLeft <= 0f)
-        {
-            EndGame("YOU LOSE!");
         }
     }
 
-    public void AddBonusTime(float seconds)
+    public void CollectCrystal(StarrootCrystal crystal)
     {
-        if (!gameOver)
+        crystalsCollected++;
+        UpdateCrystalHUD();
+
+        if (hud != null)
         {
-            timeLeft += seconds;
+            hud.ShowNotification("Discovered " + crystal.crystalName + "! (" + crystalsCollected + "/" + totalCrystals + ")");
         }
+
+        CheckTempleGateUnlock();
+        UpdateObjective();
+    }
+
+    public void OnPressurePlatesSolved()
+    {
+        pressurePlatesSolved = true;
+        CheckTempleGateUnlock();
+        UpdateObjective();
+    }
+
+    public void OnSymbolsSolved()
+    {
+        symbolsSolved = true;
+        CheckTempleGateUnlock();
+        UpdateObjective();
+    }
+
+    void CheckTempleGateUnlock()
+    {
+        if (crystalsCollected >= totalCrystals && !templeGateUnlocked)
+        {
+            templeGateUnlocked = true;
+            if (finalTempleGate != null)
+            {
+                finalTempleGate.OpenGate();
+            }
+
+            if (hud != null)
+            {
+                hud.ShowNotification("All 3 Starroot Crystals assembled! The Final Temple Gate has opened!", 5f);
+            }
+        }
+    }
+
+    void UpdateObjective()
+    {
+        if (hud == null) return;
+
+        if (relicClaimed)
+        {
+            hud.SetObjective("Victory! Starroot Relic secured!");
+        }
+        else if (templeGateUnlocked)
+        {
+            hud.SetObjective("Objective: Enter the Starroot Sanctum and claim the Relic!");
+        }
+        else if (!pressurePlatesSolved)
+        {
+            hud.SetObjective("Objective 1: Explore the jungle and activate the Ancient Pressure Plates.");
+        }
+        else if (!symbolsSolved)
+        {
+            hud.SetObjective("Objective 2: Follow the Celestial Clue to solve the Ancient Symbol Runes.");
+        }
+        else if (crystalsCollected < totalCrystals)
+        {
+            hud.SetObjective("Objective 3: Find all 3 hidden Starroot Crystals (" + crystalsCollected + "/" + totalCrystals + ")");
+        }
+    }
+
+    void UpdateCrystalHUD()
+    {
+        if (hud != null)
+        {
+            hud.SetCrystalCounter(crystalsCollected, totalCrystals);
+        }
+    }
+
+    public void OnRelicCollected()
+    {
+        relicClaimed = true;
+        EndGame("STARROOT RELIC FOUND!", true);
     }
 
     public void EndGame(string message)
     {
-        if (gameOver)
-        {
-            return;
-        }
+        EndGame(message, message.Contains("WIN") || message.Contains("FOUND") || message.Contains("STARROOT"));
+    }
 
+    public void EndGame(string message, bool isVictory)
+    {
+        if (gameOver) return;
         gameOver = true;
 
-        // Stop aiming after the game ends
         if (cannonRotate != null)
         {
             cannonRotate.enabled = false;
@@ -96,12 +196,29 @@ public class GameManager : MonoBehaviour
 
         if (endText != null)
         {
-            endText.text = message + "\nPress R to Restart";
+            endText.text = message + "\n\nPress R to Restart";
         }
 
         if (endPanel != null)
         {
             endPanel.SetActive(true);
         }
+
+        if (hud != null)
+        {
+            if (isVictory)
+            {
+                hud.ShowVictory();
+            }
+            else
+            {
+                hud.ShowGameOver();
+            }
+        }
+    }
+
+    public void RestartGame()
+    {
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 }
